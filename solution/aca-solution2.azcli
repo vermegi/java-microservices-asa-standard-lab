@@ -1,0 +1,105 @@
+AI_CONNECTIONSTRING=$(az monitor app-insights component show --app $AINAME -g $RESOURCE_GROUP --query connectionString)
+
+echo $AI_CONNECTIONSTRING
+
+AI_CONNECTIONSTRING='InstrumentationKey=32872a11-73a3-4fb5-bcf3-08abb53e871b;IngestionEndpoint=https://westeurope-5.in.applicationinsights.azure.com/;LiveEndpoint=https://westeurope.livediagnostics.monitor.azure.com/'
+
+az containerapp update \
+  --name config-server \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars APPLICATIONINSIGHTS_ROLE_NAME=config-server \
+  --image ${MYACR}.azurecr.io/spring-petclinic-config-server:$VERSIONB
+
+# The above also creates the AcrPull role assignment in the background ... Which I don't have permissions to from a Tenant perspective, so error ... BUT the actual app creation is succesfull anyways ...
+
+CONFIG_FQDN=$(az containerapp show \
+  --resource-group $RESOURCE_GROUP \
+  --name config-server \
+  --query properties.configuration.ingress.fqdn \
+  -o tsv)
+
+echo $CONFIG_FQDN
+
+az containerapp update \
+  --name discovery-server \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars APPLICATIONINSIGHTS_ROLE_NAME=discovery-server \
+  --image ${MYACR}.azurecr.io/spring-petclinic-discovery-server:$VERSIONB
+
+az containerapp update \
+  --name api-gateway \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars APPLICATIONINSIGHTS_ROLE_NAME=api-gateway \
+  --image ${MYACR}.azurecr.io/spring-petclinic-api-gateway:$VERSIONB
+
+az containerapp update \
+  --name admin-server \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars APPLICATIONINSIGHTS_ROLE_NAME=admin-server \
+  --image ${MYACR}.azurecr.io/spring-petclinic-admin-server:$VERSIONB
+
+az containerapp update \
+  --name customers-service \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars APPLICATIONINSIGHTS_CONNECTION_STRING=$AI_CONNECTIONSTRING \
+  --image ${MYACR}.azurecr.io/spring-petclinic-customers-service:$VERSIONB
+
+
+# curl -H "Content-Type: application/json" -X POST -d '{"name":"foo"}' https://config-server.salmongrass-133eba20.westeurope.azurecontainerapps.io/actuator/env
+
+az containerapp update \
+  --name vets-service \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars APPLICATIONINSIGHTS_CONNECTION_STRING=$AI_CONNECTIONSTRING \
+  --image ${MYACR}.azurecr.io/spring-petclinic-vets-service:$VERSIONB
+
+az containerapp update \
+  --name visits-service \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars APPLICATIONINSIGHTS_CONNECTION_STRING=$AI_CONNECTIONSTRING \
+  --image ${MYACR}.azurecr.io/spring-petclinic-visits-service:$VERSIONB
+
+
+az containerapp ingress enable \
+  -n config-server \
+  -g $RESOURCE_GROUP \
+  --type internal \
+  --target-port 8888
+
+CONFIG_INTERNAL_FQDN=$(az containerapp show \
+  --resource-group $RESOURCE_GROUP \
+  --name config-server \
+  --query properties.configuration.ingress.fqdn \
+  -o tsv)
+
+echo $CONFIG_INTERNAL_FQDN
+
+az containerapp update \
+  --name discovery-server \
+  --resource-group $RESOURCE_GROUP \
+  --replace-env-vars CONFIG_SERVER_URL=https://$CONFIG_INTERNAL_FQDN
+
+az containerapp update \
+  --name admin-server \
+  --resource-group $RESOURCE_GROUP \
+  --replace-env-vars CONFIG_SERVER_URL=https://$CONFIG_INTERNAL_FQDN
+
+az containerapp update \
+  --name customers-service \
+  --resource-group $RESOURCE_GROUP \
+  --replace-env-vars CONFIG_SERVER_URL=https://$CONFIG_INTERNAL_FQDN
+
+az containerapp update \
+  --name visits-service \
+  --resource-group $RESOURCE_GROUP \
+  --replace-env-vars CONFIG_SERVER_URL=https://$CONFIG_INTERNAL_FQDN
+
+az containerapp update \
+  --name vets-service \
+  --resource-group $RESOURCE_GROUP \
+  --replace-env-vars CONFIG_SERVER_URL=https://$CONFIG_INTERNAL_FQDN
+
+az containerapp update \
+  --name api-gateway \
+  --resource-group $RESOURCE_GROUP \
+  --replace-env-vars CONFIG_SERVER_URL=https://$CONFIG_INTERNAL_FQDN
